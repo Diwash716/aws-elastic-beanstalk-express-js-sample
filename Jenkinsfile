@@ -2,18 +2,24 @@ pipeline {
   agent any
 
   environment {
-    IMAGE_NAME = 'diwash716/aws-eb-express'   // your Docker Hub repo
-    SNYK_SEVERITY_THRESHOLD = 'high'
-    // tell Jenkins how to reach Docker-in-Docker
+    // ---- Registry / image ----
+    IMAGE_NAME = 'diwash716/aws-eb-express'       // your Docker Hub repo
+    SNYK_SEVERITY_THRESHOLD = 'high'              // fail on High/Critical
+
+    // ---- DinD wiring (from your docker-compose) ----
     DOCKER_HOST       = 'tcp://docker:2376'
     DOCKER_CERT_PATH  = '/certs/client'
     DOCKER_TLS_VERIFY = '1'
   }
 
-  options { timestamps() }  // keep ansiColor('xterm') only if plugin installed
+  options {
+    timestamps()
+    // ansiColor('xterm') // uncomment if AnsiColor plugin is enabled
+  }
 
   stages {
 
+    // Ensure Jenkins has the Docker CLI before any docker commands
     stage('Prepare Docker CLI') {
       steps {
         sh '''
@@ -33,13 +39,14 @@ pipeline {
 
     stage('Install deps') {
       steps {
-        // *** debug info ***
+        // Debug so we can verify the workspace contents
         sh 'echo "[debug] PWD=$PWD"; ls -la'
 
+        // Use Node 16 container for npm steps, mounting the workspace
         sh '''
           docker run --rm -v "$PWD":/app -w /app node:16 bash -lc '
             node -v
-            npm ci || npm install --save
+            npm install --save
           '
         '''
       }
@@ -56,7 +63,7 @@ pipeline {
     }
 
     stage('Security Scan (Snyk)') {
-      environment { SNYK_TOKEN = credentials('snyk_token') } // <-- your Jenkins credential ID
+      environment { SNYK_TOKEN = credentials('snyk_token') } // <-- Jenkins credential ID
       steps {
         sh """
           docker run --rm -v "\$PWD":/app -w /app -e SNYK_TOKEN="\$SNYK_TOKEN" node:16 bash -lc '
@@ -66,7 +73,11 @@ pipeline {
           '
         """
       }
-      post { always { archiveArtifacts artifacts: 'snyk.sarif', allowEmptyArchive: true } }
+      post {
+        always {
+          archiveArtifacts artifacts: 'snyk.sarif', allowEmptyArchive: true
+        }
+      }
     }
 
     stage('Build image') {
@@ -81,7 +92,7 @@ pipeline {
     stage('Push image') {
       steps {
         withCredentials([usernamePassword(
-          credentialsId: 'dockerhub',  // <-- your Jenkins Docker Hub credential ID
+          credentialsId: 'dockerhub',                 // <-- Jenkins credential ID for Docker Hub
           usernameVariable: 'USER',
           passwordVariable: 'PASS'
         )]) {
@@ -98,6 +109,7 @@ pipeline {
   post {
     always {
       archiveArtifacts artifacts: '**/build/**', allowEmptyArchive: true
+      sh 'docker logout || true'
     }
     success { echo '✅ Pipeline finished successfully.' }
     failure { echo '❌ Pipeline failed — check the failed stage logs.' }
