@@ -2,24 +2,17 @@ pipeline {
   agent any
 
   environment {
-    // ---- Registry / image ----
-    IMAGE_NAME = 'diwash716/aws-eb-express'       // your Docker Hub repo
-    SNYK_SEVERITY_THRESHOLD = 'high'              // fail on High/Critical
-
-    // ---- DinD wiring (from your docker-compose) ----
+    IMAGE_NAME = 'diwash716/aws-eb-express'
+    SNYK_SEVERITY_THRESHOLD = 'high'
     DOCKER_HOST       = 'tcp://docker:2376'
     DOCKER_CERT_PATH  = '/certs/client'
     DOCKER_TLS_VERIFY = '1'
   }
 
-  options {
-    timestamps()
-    // ansiColor('xterm') // uncomment if AnsiColor plugin is enabled
-  }
+  options { timestamps() }
 
   stages {
 
-    // Ensure Jenkins has the Docker CLI before any docker commands
     stage('Prepare Docker CLI') {
       steps {
         sh '''
@@ -39,15 +32,17 @@ pipeline {
 
     stage('Install deps') {
       steps {
-        // Debug so we can verify the workspace contents
-        sh 'echo "[debug] PWD=$PWD"; ls -la'
+        // Debug: show workspace contents
+        sh 'echo "[debug] Workspace=$PWD"; ls -la'
 
-        // Use Node 16 container for npm steps, mounting the workspace
+        // explicitly mount the workspace with package.json
         sh '''
-          docker run --rm -v "$PWD":/app -w /app node:16 bash -lc '
-            node -v
-            npm install --save
-          '
+          docker run --rm \
+            -v "/var/jenkins_home/workspace/21897377_Project2_pipeline1":/app \
+            -w /app node:16 bash -lc '
+              node -v
+              npm install --save
+            '
         '''
       }
     }
@@ -55,29 +50,29 @@ pipeline {
     stage('Unit tests') {
       steps {
         sh '''
-          docker run --rm -v "$PWD":/app -w /app node:16 bash -lc '
-            npm test || echo "No tests defined or tests failed"
-          '
+          docker run --rm \
+            -v "/var/jenkins_home/workspace/21897377_Project2_pipeline1":/app \
+            -w /app node:16 bash -lc '
+              npm test || echo "No tests defined or tests failed"
+            '
         '''
       }
     }
 
     stage('Security Scan (Snyk)') {
-      environment { SNYK_TOKEN = credentials('snyk_token') } // <-- Jenkins credential ID
+      environment { SNYK_TOKEN = credentials('snyk_token') }
       steps {
         sh """
-          docker run --rm -v "\$PWD":/app -w /app -e SNYK_TOKEN="\$SNYK_TOKEN" node:16 bash -lc '
-            npm i -g snyk &&
-            snyk auth "\$SNYK_TOKEN" &&
-            snyk test --severity-threshold=${SNYK_SEVERITY_THRESHOLD} --sarif-file-output=snyk.sarif
-          '
+          docker run --rm \
+            -v "/var/jenkins_home/workspace/21897377_Project2_pipeline1":/app \
+            -w /app -e SNYK_TOKEN="\$SNYK_TOKEN" node:16 bash -lc '
+              npm i -g snyk &&
+              snyk auth "\$SNYK_TOKEN" &&
+              snyk test --severity-threshold=${SNYK_SEVERITY_THRESHOLD} --sarif-file-output=snyk.sarif
+            '
         """
       }
-      post {
-        always {
-          archiveArtifacts artifacts: 'snyk.sarif', allowEmptyArchive: true
-        }
-      }
+      post { always { archiveArtifacts artifacts: 'snyk.sarif', allowEmptyArchive: true } }
     }
 
     stage('Build image') {
@@ -92,7 +87,7 @@ pipeline {
     stage('Push image') {
       steps {
         withCredentials([usernamePassword(
-          credentialsId: 'dockerhub',                 // <-- Jenkins credential ID for Docker Hub
+          credentialsId: 'dockerhub',
           usernameVariable: 'USER',
           passwordVariable: 'PASS'
         )]) {
