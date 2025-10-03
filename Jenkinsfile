@@ -1,5 +1,5 @@
 pipeline {
-  agent { docker { image 'node:16' } }     // Node 16 build agent (required)
+  agent any     // Node 16 build agent (required)
 
   environment {
     REGISTRY   = 'docker.io'
