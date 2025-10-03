@@ -80,25 +80,10 @@ pipeline {
       }
     }
 
-   stage('Build image') {
-  steps {
-    script {
-      // is docker available?
-      def hasDocker = (sh(returnStatus: true, script: 'command -v docker >/dev/null 2>&1') == 0)
-      // do we have a Dockerfile at repo root?
-      def hasDockerfile = fileExists('Dockerfile')
-
-      if (hasDocker && hasDockerfile) {
-        echo "[build] Building ${IMAGE_NAME}:${BUILD_NUMBER}"
-        sh "docker build --progress=plain -t ${IMAGE_NAME}:${BUILD_NUMBER} . | tee build-image.log"
-        archiveArtifacts artifacts: 'build-image.log', allowEmptyArchive: true
-      } else {
-        echo "[build] Skipped: ${hasDocker ? '' : 'docker CLI missing '} ${hasDockerfile ? '' : 'Dockerfile not found'}".trim()
+    stage('Build image') {
+      when {
+        expression { fileExists('Dockerfile') && isUnix() }
       }
-    }
-  }
-}
-
       steps {
         // Build only; no push required for Task 4
         sh '''
