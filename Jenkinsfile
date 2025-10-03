@@ -12,7 +12,6 @@ pipeline {
   options { timestamps() }
 
   stages {
-
     stage('Prepare Docker CLI') {
       steps {
         sh '''
@@ -26,51 +25,46 @@ pipeline {
       }
     }
 
+    stage('Prepare Node.js (if missing)') {
+      steps {
+        sh '''
+          if ! command -v node >/dev/null 2>&1; then
+            echo "[setup] Installing Node.js 16..."
+            curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
+            apt-get install -y nodejs
+          fi
+          node -v
+          npm -v
+        '''
+      }
+    }
+
     stage('Checkout') {
       steps { checkout scm }
     }
 
     stage('Install deps') {
       steps {
-        // Debug: show workspace contents
-        sh 'echo "[debug] Workspace=$PWD"; ls -la'
-
-        // explicitly mount the workspace with package.json
-        sh '''
-          docker run --rm \
-            -v "/var/jenkins_home/workspace/21897377_Project2_pipeline1":/app \
-            -w /app node:16 bash -lc '
-              node -v
-              npm install --save
-            '
-        '''
+        sh 'echo "[debug] PWD=$PWD"; ls -la'
+        sh 'test -f package.json || (echo "ERROR: package.json not found in $PWD" && exit 1)'
+        sh 'npm install --save'
       }
     }
 
     stage('Unit tests') {
       steps {
-        sh '''
-          docker run --rm \
-            -v "/var/jenkins_home/workspace/21897377_Project2_pipeline1":/app \
-            -w /app node:16 bash -lc '
-              npm test || echo "No tests defined or tests failed"
-            '
-        '''
+        sh 'npm test || echo "No tests defined or tests failed"'
       }
     }
 
     stage('Security Scan (Snyk)') {
       environment { SNYK_TOKEN = credentials('snyk_token') }
       steps {
-        sh """
-          docker run --rm \
-            -v "/var/jenkins_home/workspace/21897377_Project2_pipeline1":/app \
-            -w /app -e SNYK_TOKEN="\$SNYK_TOKEN" node:16 bash -lc '
-              npm i -g snyk &&
-              snyk auth "\$SNYK_TOKEN" &&
-              snyk test --severity-threshold=${SNYK_SEVERITY_THRESHOLD} --sarif-file-output=snyk.sarif
-            '
-        """
+        sh '''
+          npm i -g snyk
+          snyk auth "$SNYK_TOKEN"
+          snyk test --severity-threshold=$SNYK_SEVERITY_THRESHOLD --sarif-file-output=snyk.sarif
+        '''
       }
       post { always { archiveArtifacts artifacts: 'snyk.sarif', allowEmptyArchive: true } }
     }
@@ -106,7 +100,5 @@ pipeline {
       archiveArtifacts artifacts: '**/build/**', allowEmptyArchive: true
       sh 'docker logout || true'
     }
-    success { echo '✅ Pipeline finished successfully.' }
-    failure { echo '❌ Pipeline failed — check the failed stage logs.' }
   }
 }
