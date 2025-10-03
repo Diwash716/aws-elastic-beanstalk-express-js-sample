@@ -2,23 +2,18 @@ pipeline {
   agent any
 
   environment {
-    // ---- Docker / registry config ----
-    IMAGE_NAME = 'diwash716/aws-eb-express'  // <== your Docker Hub repo
-
-    // Tell Docker CLI inside Jenkins how to reach your DinD daemon (from docker-compose)
+    IMAGE_NAME = 'diwash716/aws-eb-express'   // your Docker Hub repo
+    SNYK_SEVERITY_THRESHOLD = 'high'
+    // tell Jenkins how to reach Docker-in-Docker
     DOCKER_HOST       = 'tcp://docker:2376'
     DOCKER_CERT_PATH  = '/certs/client'
     DOCKER_TLS_VERIFY = '1'
-
-    // ---- Security gates ----
-    SNYK_SEVERITY_THRESHOLD = 'high'
   }
 
-  options { timestamps() }  // keep clean logs (add ansiColor('xterm') if you installed AnsiColor)
+  options { timestamps() }  // keep ansiColor('xterm') only if plugin installed
 
   stages {
 
-    // Make sure the Docker CLI exists in the Jenkins container before we use it
     stage('Prepare Docker CLI') {
       steps {
         sh '''
@@ -38,8 +33,10 @@ pipeline {
 
     stage('Install deps') {
       steps {
+        // *** debug info ***
+        sh 'echo "[debug] PWD=$PWD"; ls -la'
+
         sh '''
-          echo "[debug] Using DOCKER_HOST=$DOCKER_HOST"
           docker run --rm -v "$PWD":/app -w /app node:16 bash -lc '
             node -v
             npm ci || npm install --save
@@ -59,7 +56,7 @@ pipeline {
     }
 
     stage('Security Scan (Snyk)') {
-      environment { SNYK_TOKEN = credentials('snyk_token') } // <-- Jenkins secret text ID
+      environment { SNYK_TOKEN = credentials('snyk_token') } // <-- your Jenkins credential ID
       steps {
         sh """
           docker run --rm -v "\$PWD":/app -w /app -e SNYK_TOKEN="\$SNYK_TOKEN" node:16 bash -lc '
@@ -84,7 +81,7 @@ pipeline {
     stage('Push image') {
       steps {
         withCredentials([usernamePassword(
-          credentialsId: 'dockerhub',     // <-- Jenkins username/password ID for Docker Hub
+          credentialsId: 'dockerhub',  // <-- your Jenkins Docker Hub credential ID
           usernameVariable: 'USER',
           passwordVariable: 'PASS'
         )]) {
@@ -100,7 +97,6 @@ pipeline {
 
   post {
     always {
-      // keep some logs/artifacts for Task 4 evidence
       archiveArtifacts artifacts: '**/build/**', allowEmptyArchive: true
     }
     success { echo '✅ Pipeline finished successfully.' }
